@@ -191,6 +191,7 @@ contract DeployFrensForkTest is Test, FrensRules {
     function test_Wired() public view {
         IMD6900Frens f = d.frens;
         assertEq(f.owner(), address(s));
+        assertEq(f.governor(), address(s), "the deployer governs until the handover");
         assertEq(f.keeper(), keeper);
         assertEq(f.relayer(), relayer);
         assertEq(f.renderer(), address(d.renderer));
@@ -211,7 +212,7 @@ contract DeployFrensForkTest is Test, FrensRules {
         );
         _rules(ref, [uint16(1598), 312, 312]);
         for (uint8 t; t < 8; ++t) {
-            for (uint8 v; v < d.frens.valuesOf(t); ++v) {
+            for (uint8 v; v < [3, 13, 4, 3, 6, 3, 10, 16][t]; ++v) { // each trait's values
                 IMD6900Frens.Rule memory a = d.frens.ruleOf(t, v);
                 IMD6900Frens.Rule memory b = ref.ruleOf(t, v);
                 assertEq(a.cap, b.cap, "cap");

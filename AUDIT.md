@@ -52,8 +52,12 @@ five agents choose the frens' traits layer by layer; the rest of the price backs
 
 ## Roles and trust
 
-- **Owner**: the deployer until `handover`, then the Ethereum timelock (48h). Settings, modules (swapper, gate),
-  royalty, tiers. The trait rules are sealed at deploy; min tiers can only go down afterwards.
+- **Governor**: the deployer until `handover`, then the Ethereum timelock (48h). Modules (swapper, gate), roles,
+  tiers, max mint, floor parameters, opening the mint, the pre-opening mint. The trait rules are sealed at deploy; min
+  tiers can only go down afterwards.
+- **Owner** (`owner()`): a team wallet, never the timelock: marketplaces (OpenSea) treat it as the collection's owner,
+  who signs in to edit the collection. On chain it can only set the royalty (at most 10%, always paid to the frens
+  contract's floor) and the transfer validator; the governor can set those too.
 - **Keeper**: approves job payments. **Relayer**: signs vouchers; it can only choose among combos the contract accepts.
 - **Gate owner**: the deployer; can only widen who may mint (`openPublic`).
 - The swapper and the gate are callable only by the frens contract where it matters.
@@ -67,7 +71,7 @@ five agents choose the frens' traits layer by layer; the rest of the price backs
 3. The job payment: only the approved Permit2 / quote digests validate; allowance and `jobBudget` bookkeeping across
    lapsed payments, retries and full reveals.
 4. Reveal: voucher replay or reuse across requests and parts; trait caps, tiers, pair rules, pepes held for low tiers.
-5. Tiers: any way to reach a higher tier without holding the bag (borrowed balances, the treasury, other contracts).
+5. Roles: anything the owner (a team wallet) can do beyond the royalty and the validator; tiers: any way to reach a higher tier without holding the bag (borrowed balances, the treasury, other contracts).
 6. The workers' window: credits, double use of an NFT, the boundary at 420, the owner's pre-opening mint.
 7. FrenMinter / FrenSwapper: v4 unlock callbacks, deltas, refunds, leftovers; ETH and token handling.
 8. ERC-721C validation and its exemptions; ERC-2981; the renderer's output for every valid combo.
@@ -84,9 +88,9 @@ five agents choose the frens' traits layer by layer; the rest of the price backs
 
 ## Accepted by design
 
-- The owner (timelock) can replace the swapper and raise `maxImdPerBuy`, so a malicious swapper could take the waiting
+- The governor (timelock) can replace the swapper and raise `maxImdPerBuy`, so a malicious swapper could take the waiting
   `floorImd`; the reserve (IMD6900) cannot be moved by any owner call. 48h notice lets holders exit at the floor first.
-- The owner can redirect future job payments (`imdPayTo`); at most `jobBudget`.
+- The governor can redirect future job payments (`imdPayTo`); at most `jobBudget`.
 - If a request is fully revealed while an approved payment is still untaken, that 0.5 $IMD stays idle.
 - `floorRate` lags the pool by design (1/64 per buy-block) and only ever counts IMD6900 at its dearer reading.
 

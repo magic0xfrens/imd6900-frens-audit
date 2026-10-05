@@ -887,14 +887,56 @@ contract IMD6900FrensTest is Test, FrensRules {
     function test_RoyaltyBpsIsCappedAndOwnerOnly() public {
         vm.prank(alice);
         vm.expectRevert();
-        frens.setParams(1_000, 1, 50e18, 0.25 ether);
+        frens.setRoyalty(1_000);
         vm.prank(timelock);
         vm.expectRevert(IMD6900Frens.Cap.selector);
-        frens.setParams(1_001, 1, 50e18, 0.25 ether);
+        frens.setRoyalty(1_001);
         vm.prank(timelock);
-        frens.setParams(1_000, 1, 50e18, 0.25 ether);
-        (, uint256 amount) = frens.royaltyInfo(1, 1 ether);
+        frens.setRoyalty(1_000);
+        (address to, uint256 amount) = frens.royaltyInfo(1, 1 ether);
         assertEq(amount, 0.1 ether);
+        assertEq(to, address(frens), "always to the floor");
+    }
+
+    /// @dev After the handover the governor (the timelock) holds the mint's and the floor's settings; the owner (a team
+    ///      wallet, what OpenSea treats as the collection's owner) keeps only the royalty and the transfer validator
+    function test_TheOwnerKeepsTheCollection_theGovernorTheMechanics() public {
+        address team = timelock; // the deployer: owner and governor until the handover
+        address dao = makeAddr("the timelock");
+        vm.prank(alice);
+        vm.expectRevert(Ownable.Unauthorized.selector);
+        frens.setGovernor(alice);
+        vm.prank(team);
+        frens.setGovernor(dao);
+        assertEq(frens.governor(), dao);
+        assertEq(frens.owner(), team, "the collection stays the team's");
+
+        vm.startPrank(team); // the collection's marketplace settings: still the team's, at once
+        frens.setRoyalty(750);
+        frens.setTransferValidator(address(0));
+        vm.expectRevert(Ownable.Unauthorized.selector);
+        frens.setModules(address(0xbad), address(0));
+        vm.expectRevert(Ownable.Unauthorized.selector);
+        frens.setParams(1, 1_000e18, 1 ether);
+        vm.expectRevert(Ownable.Unauthorized.selector);
+        frens.setMintOpen(false);
+        vm.expectRevert(Ownable.Unauthorized.selector);
+        frens.setRoles(team, team, team, team);
+        vm.expectRevert(Ownable.Unauthorized.selector);
+        frens.setGovernor(team);
+        vm.stopPrank();
+        (, uint256 amount) = frens.royaltyInfo(1, 1 ether);
+        assertEq(amount, 0.075 ether);
+
+        vm.startPrank(dao); // the mechanics: the governor's alone (and the royalty too)
+        frens.setParams(2, 40e18, 0.2 ether);
+        frens.setRoyalty(500);
+        frens.setMintOpen(false);
+        vm.stopPrank();
+        assertEq(frens.buyDelayBlocks(), 2);
+        vm.prank(team);
+        vm.expectRevert(IMD6900Frens.MintClosed.selector);
+        frens.requestMint(1, type(uint256).max); // only the governor mints before an opening
     }
 
     /// @dev Mints buy as they come; anyone buys what's left, one buy a block (the swapper's price limit is what makes

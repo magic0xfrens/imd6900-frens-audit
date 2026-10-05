@@ -49,9 +49,9 @@ case "${1:-status}" in
       && [ "$(cast call $FRENS 'traitsSealed()(bool)' --rpc-url "$RPC")" = true ] \
       && [ "$(cast call $FRENS 'imd6900()(address)' --rpc-url "$RPC" | lc)" = "$(echo $IMD6900 | lc)" ] \
       || { echo "the contracts at $FRENS / $SWAPPER aren't the frens and their swapper, wired and sealed: not executing"; exit 1; }
-    case "$(cast call $FRENS 'owner()(address)' --rpc-url "$RPC" | lc)" in
+    case "$(cast call $FRENS 'governor()(address)' --rpc-url "$RPC" | lc)" in
       0x35da9c0303507ddf708e87f2568eddf12c47a059|"$(echo $TL | lc)") ;;
-      *) echo "the frens' owner is neither the deployer nor the timelock: not executing"; exit 1 ;;
+      *) echo "the frens' governor is neither the deployer nor the timelock: not executing"; exit 1 ;;
     esac
     cast send $TL 'executeBatch(address[],uint256[],bytes[],bytes32,bytes32)' "$TARGETS" "$VALUES" "$DATAS" $ZERO $SALT "${SIGN[@]}" --rpc-url "$RPC"
     ;;

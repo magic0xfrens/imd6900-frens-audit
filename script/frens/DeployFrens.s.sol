@@ -25,7 +25,8 @@ interface ICreateX {
 ///  3. wires them and sets the launch trait rules, then seals them (they can never change, only a min tier go down).
 ///  The mint stays closed. Then, from the deployer:
 ///   - a test mint through the relayer (tools/fren-relayer.mjs), then setMintOpen(true);
-///   - `handover(frens)`: ownership to the Ethereum timelock (settings take 48h from then).
+///   - `handover(frens)`: the governor (the mint's and the floor's settings) to the Ethereum timelock, 48h from then;
+///     the owner (the collection on OpenSea: royalty, validator) stays a team wallet.
 ///  The hook's fee changes are a timelock batch of their own (FrensTimelockBatch.s.sol).
 ///
 ///   FRENS_KEEPER=0x… FRENS_RELAYER=0x… forge script script/frens/DeployFrens.s.sol --rpc-url $MAINNET_RPC_URL \
@@ -76,7 +77,7 @@ contract DeployFrens is Script {
         console2.log("FrenMinter   ", address(d.minter));
         console2.log("WorkerGate   ", address(d.gate));
         console2.log("price table  ", d.prices);
-        console2.log("owner (until handover)", d.frens.owner());
+        console2.log("owner and governor (until the handover)", d.frens.owner());
     }
 
     /// @notice Before the opening, the owner mints `count` frens to the IMD6900 strategy (tier 3: it holds identity.md
@@ -102,10 +103,13 @@ contract DeployFrens is Script {
         console2.log("frens minted to the strategy", count, "total minted", frens.totalMinted());
     }
 
+    /// @notice The mint's and the floor's settings to the Ethereum timelock (governor). The owner, which marketplaces
+    ///         treat as the collection's owner (OpenSea's page, royalty, validator), stays the deployer: move it to
+    ///         another team wallet with transferOwnership if wanted, never to a contract that can't sign in.
     function handover(IMD6900Frens frens) external {
         vm.broadcast();
-        frens.transferOwnership(TIMELOCK);
-        console2.log("owner", frens.owner());
+        frens.setGovernor(TIMELOCK);
+        console2.log("governor", frens.governor(), "owner (the collection)", frens.owner());
     }
 
     /// @dev Every step, from the test contract (the fork tests): plain deploys, no fixed addresses

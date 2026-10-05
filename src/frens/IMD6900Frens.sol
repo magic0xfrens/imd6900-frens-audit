@@ -98,7 +98,11 @@ interface IFrenRenderer {
 ///  other fee. Mints, burns and the floor's own moves (recycle, buyTreasury) are never checked.
 ///
 /// @dev Roles:
-///  - Owner (the Ethereum timelock): settings, and the trait rules until they are sealed.
+///  - Governor (the Ethereum timelock after the handover): every setting that touches the mint, the floor or the
+///    money (modules, roles, tiers, caps, opening the mint), and the trait rules until they are sealed.
+///  - Owner (a team wallet, never the timelock): the collection on marketplaces. OpenSea and the others treat owner()
+///    as the collection's owner, who signs in to edit its page, so it must be a wallet that can sign. On chain it only
+///    sets the royalty (at most 10%, always paid to this contract's floor) and the transfer validator.
 ///  - Keeper: approves a request's single job payment (the contract "signs" it through ERC-1271: exactly JOB_PRICE of
 ///    $IMD to `imdPayTo` through the x402 Permit2 proxy).
 ///  - Relayer: signs claim vouchers. It cannot mint anything the contract's own checks refuse.
@@ -148,6 +152,7 @@ contract IMD6900Frens is ERC721, Ownable, ReentrancyGuard {
     address public swapper;
     address public renderer;
     address public workerGate; // while it says so, a mint needs a worker credit (FrenWorkerGate)
+    address public governor; // the mint's and the floor's settings: the timelock after the handover
     uint256 public maxImdPerBuy = 50e18; // floor buys, per call
     uint256 public maxEthPerBuy = 0.25 ether;
     bool public mintOpen;
@@ -265,8 +270,23 @@ contract IMD6900Frens is ERC721, Ownable, ReentrancyGuard {
     error InvalidTransferValidator();
 
     modifier onlyKeeper() {
-        if (msg.sender != keeper && msg.sender != owner()) revert NotKeeper();
+        if (msg.sender != keeper && msg.sender != governor) revert NotKeeper();
         _;
+    }
+
+    modifier onlyGovernor() {
+        _onlyGovernor();
+        _;
+    }
+
+    /// @dev The collection's marketplace settings: its owner, or the governor
+    modifier onlyCurator() {
+        if (msg.sender != owner()) _onlyGovernor();
+        _;
+    }
+
+    function _onlyGovernor() internal view {
+        if (msg.sender != governor) revert Unauthorized();
     }
 
     constructor(
@@ -284,6 +304,7 @@ contract IMD6900Frens is ERC721, Ownable, ReentrancyGuard {
         if (priceTable_.code.length != 1 + 3 * SUPPLY) revert BadTraits();
         priceTable = priceTable_;
         _initializeOwner(owner_);
+        governor = owner_; // the deployer, until the handover
         imd = imd_;
         imd6900 = imd6900_;
         identity = identity_;
@@ -313,7 +334,7 @@ contract IMD6900Frens is ERC721, Ownable, ReentrancyGuard {
     /* ── the traits: set once, then sealed ──────────────────────── */
 
     /// @notice How many values a trait has (the renderer draws exactly these)
-    function valuesOf(uint8 trait) public pure returns (uint8) {
+    function valuesOf(uint8 trait) internal pure returns (uint8) {
         return [3, 13, 4, 3, 6, 3, 10, 16][trait];
     }
 
@@ -331,7 +352,7 @@ contract IMD6900Frens is ERC721, Ownable, ReentrancyGuard {
     }
 
     /// @notice Sets every value of one trait: its cap and the lowest tier that may take it. Before sealing only.
-    function setTraitRules(uint8 trait, uint16[] calldata caps, uint8[] calldata minTiers) external onlyOwner {
+    function setTraitRules(uint8 trait, uint16[] calldata caps, uint8[] calldata minTiers) external onlyGovernor {
         if (traitsSealed) revert TraitsAreSealed();
         uint8 n = valuesOf(trait);
         if (caps.length != n || minTiers.length != n) revert BadTraits();
@@ -343,7 +364,7 @@ contract IMD6900Frens is ERC721, Ownable, ReentrancyGuard {
     }
 
     /// @notice Adds a pair of values that together need a higher tier. Before sealing only.
-    function addPairRule(PairRule calldata p) external onlyOwner {
+    function addPairRule(PairRule calldata p) external onlyGovernor {
         if (traitsSealed) revert TraitsAreSealed();
         if (_pairs.length >= MAX_PAIR_RULES || p.traitA >= TRAITS || p.traitB >= TRAITS || p.minTier > TIERS) revert BadTraits();
         if (p.valueA >= valuesOf(p.traitA) || p.valueB >= valuesOf(p.traitB)) revert BadTraits();
@@ -351,7 +372,7 @@ contract IMD6900Frens is ERC721, Ownable, ReentrancyGuard {
     }
 
     /// @notice Locks the rules: every trait set, and the characters' caps add up to the supply.
-    function sealTraits() external onlyOwner {
+    function sealTraits() external onlyGovernor {
         if (traitsSealed) revert TraitsAreSealed();
         if (_configured != type(uint8).max) revert BadTraits();
         uint256 chars;
@@ -362,7 +383,7 @@ contract IMD6900Frens is ERC721, Ownable, ReentrancyGuard {
     }
 
     /// @notice Lets lower tiers take a value nobody above them did: it can only ever go down, never up.
-    function lowerMinTier(uint8 trait, uint8 value, uint8 minTier) external onlyOwner {
+    function lowerMinTier(uint8 trait, uint8 value, uint8 minTier) external onlyGovernor {
         Rule storage r = _rules[uint256(trait) << 8 | value];
         if (trait >= TRAITS || value >= valuesOf(trait) || minTier >= r.minTier) revert BadTraits();
         r.minTier = minTier;
@@ -470,7 +491,7 @@ contract IMD6900Frens is ERC721, Ownable, ReentrancyGuard {
     ///         minter's.
     function requestMintFor(address minter, uint8 count, uint256 maxPay) public nonReentrant returns (uint256 requestId) {
         // before opening only the owner mints (the strategy's first frens); after, the workers' window comes first
-        if (!mintOpen && msg.sender != owner()) revert MintClosed();
+        if (!mintOpen && msg.sender != governor) revert MintClosed();
         if (!traitsSealed) revert TraitsNotSealed();
         // never into the treasury: its frens would take the tier of the floor's own bag, for anyone to buy out
         if (count == 0 || count > MAX_PER_REQUEST || minter == address(0) || minter == address(this)) revert BadRequest();
@@ -816,7 +837,7 @@ contract IMD6900Frens is ERC721, Ownable, ReentrancyGuard {
     }
 
     /// @notice The owner (the timelock) can move to another validator, or to address(0) to stop validating
-    function setTransferValidator(address validator) external onlyOwner {
+    function setTransferValidator(address validator) external onlyCurator {
         if (validator != address(0) && validator.code.length == 0) revert InvalidTransferValidator();
         emit ICreatorToken.TransferValidatorUpdated(getTransferValidator(), validator);
         _validatorSet = true;
@@ -864,7 +885,7 @@ contract IMD6900Frens is ERC721, Ownable, ReentrancyGuard {
     /* ── settings ────────────────────────────────────────────────── */
 
     /// @notice The keeper, the relayer, IMD's payee for jobs and the renderer; address(0) leaves one as it is
-    function setRoles(address keeper_, address relayer_, address imdPayTo_, address renderer_) external onlyOwner {
+    function setRoles(address keeper_, address relayer_, address imdPayTo_, address renderer_) external onlyGovernor {
         if (keeper_ != address(0)) keeper = keeper_;
         if (relayer_ != address(0)) relayer = relayer_;
         if (imdPayTo_ != address(0)) imdPayTo = imdPayTo_;
@@ -873,7 +894,7 @@ contract IMD6900Frens is ERC721, Ownable, ReentrancyGuard {
     }
 
     /// @notice The modules: the swapper that buys the floor, and the workers' window (address(0): none)
-    function setModules(address swapper_, address workerGate_) external onlyOwner {
+    function setModules(address swapper_, address workerGate_) external onlyGovernor {
         (swapper, workerGate) = (swapper_, workerGate_);
         emit Setting("modules", uint160(workerGate_), swapper_);
     }
@@ -881,7 +902,7 @@ contract IMD6900Frens is ERC721, Ownable, ReentrancyGuard {
     /// @notice The tiers' thresholds, lowest tier first; each must not fall from one tier to the next
     function setTiers(uint256[TIERS] calldata imd_, uint256[TIERS] calldata imd6900_, uint256[TIERS] calldata identity_)
         external
-        onlyOwner
+        onlyGovernor
     {
         for (uint256 i = 1; i < TIERS; ++i) {
             if (imd_[i] < imd_[i - 1] || imd6900_[i] < imd6900_[i - 1] || identity_[i] < identity_[i - 1]) revert BadTraits();
@@ -893,7 +914,7 @@ contract IMD6900Frens is ERC721, Ownable, ReentrancyGuard {
     }
 
     /// @notice How many frens one request may ask for, by tier: never fewer for a higher tier, 1 to 69
-    function setMaxMint(uint8[TIERS + 1] calldata m) external onlyOwner {
+    function setMaxMint(uint8[TIERS + 1] calldata m) external onlyGovernor {
         for (uint256 i; i <= TIERS; ++i) {
             if (m[i] == 0 || m[i] > MAX_PER_REQUEST || (i > 0 && m[i] < m[i - 1])) revert BadTraits();
         }
@@ -901,15 +922,27 @@ contract IMD6900Frens is ERC721, Ownable, ReentrancyGuard {
         emit Setting("maxMint", m[TIERS], address(0));
     }
 
-    /// @notice The royalty marketplaces pay into the floor (at most 10%), the blocks between floor buys, and the most
-    ///         one floor buy spends ($IMD, ETH)
-    function setParams(uint96 royaltyBps_, uint256 buyDelayBlocks_, uint256 imdCap, uint256 ethCap) external onlyOwner {
-        if (royaltyBps_ > 1_000) revert Cap();
-        (royaltyBps, buyDelayBlocks, maxImdPerBuy, maxEthPerBuy) = (royaltyBps_, buyDelayBlocks_, imdCap, ethCap);
-        emit Setting("params", royaltyBps_, address(0));
+    /// @notice The blocks between floor buys, and the most one floor buy spends ($IMD, ETH)
+    function setParams(uint256 buyDelayBlocks_, uint256 imdCap, uint256 ethCap) external onlyGovernor {
+        (buyDelayBlocks, maxImdPerBuy, maxEthPerBuy) = (buyDelayBlocks_, imdCap, ethCap);
+        emit Setting("params", buyDelayBlocks_, address(0));
     }
 
-    function setMintOpen(bool open) external onlyOwner {
+    /// @notice The marketplace royalty (ERC-2981), at most 10%: always paid to this contract, where it buys the floor
+    function setRoyalty(uint96 bps) external onlyCurator {
+        if (bps > 1_000) revert Cap();
+        royaltyBps = bps;
+        emit Setting("royalty", bps, address(0));
+    }
+
+    /// @notice Hands the mint's and the floor's settings on (to the timelock): the owner keeps the collection
+    function setGovernor(address g) external onlyGovernor {
+        if (g == address(0)) revert Unauthorized();
+        governor = g;
+        emit Setting("governor", 0, g);
+    }
+
+    function setMintOpen(bool open) external onlyGovernor {
         mintOpen = open;
         emit Setting("mintOpen", open ? 1 : 0, address(0));
     }
