@@ -1,0 +1,20 @@
+# IMD6900 Frens: audit snapshot. Builds offline: every library is vendored under lib/ (only the files imported).
+# Any installed solc >= 0.8.26 works (auto-detected); the mainnet deploy builds with 0.8.30.
+[profile.default]
+src = "src"
+test = "test"
+script = "script"
+out = "out"
+libs = ["lib"]
+auto_detect_solc = true
+optimizer = true
+optimizer_runs = 200
+via_ir = true
+evm_version = "cancun"
+fs_permissions = [{ access = "read", path = "./script/frens/art" }, { access = "read", path = "./script/frens/price" }]
+remappings = [
+    "solady/=lib/solady/src/",
+    "@uniswap/v4-core/=lib/v4-core/",
+    "forge-std/=lib/forge-std/src/",
+    "@openzeppelin/contracts/=lib/openzeppelin-contracts/contracts/",
+]

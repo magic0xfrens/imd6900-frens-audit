@@ -1,0 +1,32 @@
+[
+ {
+  "combo": 0,
+  "seed": "0",
+  "bmpSha256": "0x9f9b17dd294e4bf9b4e510c4a51cae58f056750e963ec4facc93ecceb6d63389"
+ },
+ {
+  "combo": 6542748,
+  "seed": "1",
+  "bmpSha256": "0x5d27ca7bc446a8e80e8bcb1efc52d613d2d10f0e93b8d01aa25cabba0887321d"
+ },
+ {
+  "combo": 7440973,
+  "seed": "6900",
+  "bmpSha256": "0x0ca77faf37983676ca9e194d58e7d1d9afa4f7903b328d62eb67a5e680b27698"
+ },
+ {
+  "combo": 3969218,
+  "seed": "57896044618658097711785492504343953926634992332820282019728792003956564832313",
+  "bmpSha256": "0x709839712ec84383b86e6cded3c2a0e2a7c72065ec88860c90feba4489c61431"
+ },
+ {
+  "combo": 8037936,
+  "seed": "424242",
+  "bmpSha256": "0x09f349fe78a3e8883961deb645fb2abaf71cb05b5bc8db6d7b25d2e4e0f04db5"
+ },
+ {
+  "combo": 524785,
+  "seed": "77",
+  "bmpSha256": "0x31266ad5683fdb3769e5b9042623be07cb8aa10502d47cf71fa9e5a6599821c5"
+ }
+]
