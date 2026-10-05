@@ -8,6 +8,7 @@ import {IMD6900Frens} from "../../src/frens/IMD6900Frens.sol";
 import {FrensRules} from "./FrensRules.sol";
 import {FrensTimelockBatch} from "../../script/frens/FrensTimelockBatch.s.sol";
 import {FrenWorkerGate} from "../../src/frens/FrenWorkerGate.sol";
+import {FrenArt, FrenRenderer} from "../../src/frens/FrenRenderer.sol";
 import {Ownable} from "solady/auth/Ownable.sol";
 
 interface IOwnerOf {
@@ -186,6 +187,57 @@ contract DeployFrensForkTest is Test, FrensRules {
         vm.prank(stranger);
         vm.expectRevert(IMD6900Frens.MintClosed.selector);
         d.frens.requestMint(1, type(uint256).max);
+    }
+
+    /* ── the art apart: deployed first, or later ──────────────── */
+
+    /// @dev The public mint, one fren for `who`: what a marketplace then reads is tokenURI(1)
+    function _openAndMintOne(DeployFrens.Deployed memory x, address who) internal {
+        vm.startPrank(address(s));
+        x.frens.setMintOpen(true);
+        x.gate.openPublic();
+        vm.stopPrank();
+        address imd = s.IMD();
+        deal(imd, who, 10e18);
+        vm.startPrank(who);
+        IERC20(imd).approve(address(x.frens), type(uint256).max);
+        x.frens.requestMint(1, type(uint256).max);
+        vm.stopPrank();
+    }
+
+    /// @notice The art goes on chain first (any day, any gas price), the rest later reuses it
+    function test_ArtFirst_thenTheRest() public {
+        FrenArt a = new FrenArt();
+        FrenRenderer r = s.writeArt(a);
+        assertTrue(s.isOurArt(a, r));
+        DeployFrens.Deployed memory x = s.deployWith(address(s), keeper, relayer, a, r, false);
+        assertEq(x.frens.renderer(), address(r), "the frens draw with the art deployed before");
+        assertEq(address(x.renderer), address(r));
+        _openAndMintOne(x, stranger);
+        assertGt(bytes(x.frens.tokenURI(1)).length, 1000, "an unrevealed fren's metadata, through it");
+    }
+
+    /// @notice A renderer that doesn't draw this art (here: layers kept elsewhere) is refused
+    function test_ForeignRendererRefused() public {
+        FrenArt a = new FrenArt();
+        FrenRenderer other = s.writeArt(new FrenArt());
+        assertFalse(s.isOurArt(a, other));
+        vm.expectRevert(bytes("FRENS_RENDERER doesn't draw this art (FRENS_ART)"));
+        s.deployWith(address(s), keeper, relayer, a, other, false);
+    }
+
+    /// @notice Or the rest goes first, without art: tokenURI waits until the governor points the frens at a renderer
+    function test_NoArtYet_thenSetRenderer() public {
+        DeployFrens.Deployed memory x = s.deployWith(address(s), keeper, relayer, FrenArt(address(0)), FrenRenderer(address(0)), true);
+        assertEq(x.frens.renderer(), address(0));
+        _openAndMintOne(x, stranger);
+        vm.expectRevert();
+        x.frens.tokenURI(1);
+        FrenRenderer r = s.writeArt(x.art);
+        assertTrue(s.isOurArt(x.art, r));
+        vm.prank(address(s));
+        x.frens.setRenderer(address(r));
+        assertGt(bytes(x.frens.tokenURI(1)).length, 1000, "the metadata appears once the art is in");
     }
 
     function test_Wired() public view {

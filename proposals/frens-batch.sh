@@ -17,6 +17,7 @@
 set -euo pipefail
 RPC="${RPC:-https://rpc.mevblocker.io}"
 SIGN=(--account "${ACCOUNT:-imdstr-deployer}")
+[ -n "${SIGN_ARGS:-}" ] && read -r -a SIGN <<<"$SIGN_ARGS" # a rehearsal on a fork: SIGN_ARGS="--unlocked --from 0x35dA…"
 TL=0xBd3ed9F4AbD9946cA6F59C8F13A3EbebDE1EA29D
 HOOK=0xA16026A28aA581AA96713d20C608Da7F8db86444
 IMD6900=0x0000198C940D8cD70Cb9ACeC5E3af8216ac57d2F

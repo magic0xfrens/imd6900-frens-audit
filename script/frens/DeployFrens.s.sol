@@ -63,12 +63,18 @@ contract DeployFrens is Script {
         FrenWorkerGate gate;
     }
 
+    /// @notice The whole deploy. With FRENS_ART and FRENS_RENDERER (from `art()`, run earlier) it reuses that art and
+    ///         checks the renderer draws exactly this repository's layers; with FRENS_NO_ART=true it deploys without a
+    ///         renderer (tokenURI waits until `setRenderer`); with neither, it writes the art too.
     function run() external returns (Deployed memory d) {
         address keeper = vm.envAddress("FRENS_KEEPER");
         address relayer = vm.envAddress("FRENS_RELAYER");
+        FrenArt art_ = FrenArt(vm.envOr("FRENS_ART", address(0)));
+        FrenRenderer renderer_ = FrenRenderer(vm.envOr("FRENS_RENDERER", address(0)));
+        bool noArt = vm.envOr("FRENS_NO_ART", false);
         vm.startBroadcast();
         require(msg.sender == DEPLOYER, "the fixed addresses belong to the deployer 0x35dA...a059");
-        d = _deploy(msg.sender, keeper, relayer, true);
+        d = _deploy(msg.sender, keeper, relayer, true, art_, renderer_, noArt);
         vm.stopBroadcast();
         console2.log("FrenArt      ", address(d.art));
         console2.log("FrenRenderer ", address(d.renderer));
@@ -95,7 +101,9 @@ contract DeployFrens is Script {
         IERC20Min(IMD).approve(address(frens), cost);
         for (uint256 left = count; left > 0;) {
             uint8 n = uint8(left > 69 ? 69 : left);
-            frens.requestMintFor(IMD6900, n, type(uint256).max);
+            // its own gas: forge simulates every request in one block, where only the first buys the floor, so its
+            // estimate for the later ones leaves out the buy they do make on chain (and the contract's gas guard reverts)
+            frens.requestMintFor{gas: 800_000 + 35_000 * uint256(n)}(IMD6900, n, type(uint256).max);
             left -= n;
         }
         IERC20Min(IMD).approve(address(frens), 0);
@@ -112,14 +120,68 @@ contract DeployFrens is Script {
         console2.log("governor", frens.governor(), "owner (the collection)", frens.owner());
     }
 
-    /// @dev Every step, from the test contract (the fork tests): plain deploys, no fixed addresses
-    function deploy(address owner, address keeper, address relayer) public returns (Deployed memory d) {
-        return _deploy(owner, keeper, relayer, false);
+    /// @notice The art alone: FrenArt, every layer, the palette, and FrenRenderer (most of the deploy's gas). It depends on
+    ///         nothing else, so it can go on chain any time before the opening, when gas is cheapest; the frens can keep
+    ///         changing meanwhile. Then `run` with FRENS_ART and FRENS_RENDERER set to what this prints.
+    ///   forge script script/frens/DeployFrens.s.sol --sig "art()" --rpc-url … --account imdstr-deployer --sender 0x35dA… --broadcast --slow
+    function art() external returns (FrenArt a, FrenRenderer r) {
+        vm.startBroadcast();
+        a = new FrenArt();
+        r = writeArt(a);
+        vm.stopBroadcast();
+        require(isOurArt(a, r), "the renderer doesn't draw this art");
+        console2.log("FrenArt      ", address(a));
+        console2.log("FrenRenderer ", address(r));
     }
 
-    function _deploy(address owner, address keeper, address relayer, bool fixedAt) internal returns (Deployed memory d) {
-        d.art = new FrenArt();
-        d.renderer = writeArt(d.art);
+    /// @notice Points deployed frens at a renderer: the owner's call (the collection's look), until freezeArt
+    ///   forge script script/frens/DeployFrens.s.sol --sig "setRenderer(address,address,address)" <frens> <art> <renderer> … --broadcast
+    function setRenderer(IMD6900Frens frens, FrenArt a, FrenRenderer r) external {
+        require(isOurArt(a, r), "the renderer doesn't draw this art");
+        vm.broadcast();
+        frens.setRenderer(address(r));
+        console2.log("renderer", frens.renderer());
+    }
+
+    /// @notice Whether `r` draws exactly this repository's art, kept by `a`: every layer and the palette where `a` keeps
+    ///         them (content-addressed), the face table, the shadow
+    function isOurArt(FrenArt a, FrenRenderer r) public view returns (bool) {
+        if (address(a).code.length == 0 || address(r).code.length == 0) return false;
+        string memory manifest = vm.readFile(string.concat(ART, "manifest.json"));
+        string[] memory names = vm.parseJsonStringArray(manifest, ".layers");
+        address[] memory got = r.layers();
+        if (got.length != names.length) return false;
+        for (uint256 i; i < names.length; ++i) {
+            if (got[i] != a.pointer(vm.readFileBinary(string.concat(ART, "layers/", names[i], ".bin")))) return false;
+        }
+        return r.palette() == a.pointer(vm.readFileBinary(string.concat(ART, "palette.bin")))
+            && r.shadow() == uint8(vm.parseJsonUint(manifest, ".shadow"));
+    }
+
+    /// @dev Every step, from the test contract (the fork tests): plain deploys, no fixed addresses
+    function deploy(address owner, address keeper, address relayer) public returns (Deployed memory d) {
+        return _deploy(owner, keeper, relayer, false, FrenArt(address(0)), FrenRenderer(address(0)), false);
+    }
+
+    /// @dev The same with art deployed earlier (`a`/`r`), or none yet (`noArt`)
+    function deployWith(address owner, address keeper, address relayer, FrenArt a, FrenRenderer r, bool noArt)
+        public
+        returns (Deployed memory d)
+    {
+        return _deploy(owner, keeper, relayer, false, a, r, noArt);
+    }
+
+    function _deploy(address owner, address keeper, address relayer, bool fixedAt, FrenArt a, FrenRenderer r, bool noArt)
+        internal
+        returns (Deployed memory d)
+    {
+        if (address(r) != address(0)) {
+            require(isOurArt(a, r), "FRENS_RENDERER doesn't draw this art (FRENS_ART)");
+            (d.art, d.renderer) = (a, r);
+        } else {
+            d.art = address(a) != address(0) ? a : new FrenArt();
+            if (!noArt) d.renderer = writeArt(d.art);
+        }
         bytes[] memory table = new bytes[](1);
         table[0] = vm.readFileBinary("script/frens/price/prices.bin");
         d.prices = d.art.write(table)[0];
@@ -135,7 +197,7 @@ contract DeployFrens is Script {
         d.minter = new FrenMinter(POOL_MANAGER, address(d.frens), POOL4_HOOK, PAIR_HOOK);
         // the workers' window: its owner is the deployer, not the timelock, so it can open the public mint at once
         d.gate = new FrenWorkerGate(owner, address(d.frens), IDENTITY, IMD6900);
-        d.frens.setRoles(address(0), address(0), address(0), address(d.renderer));
+        if (address(d.renderer) != address(0)) d.frens.setRenderer(address(d.renderer));
         d.frens.setModules(address(d.swapper), address(d.gate));
         launchRules(d.frens);
         d.frens.sealTraits();

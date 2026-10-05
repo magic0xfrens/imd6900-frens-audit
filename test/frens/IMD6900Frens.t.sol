@@ -305,7 +305,7 @@ contract IMD6900FrensTest is Test, FrensRules {
     function test_MintMintsAtOnce_unrevealed() public {
         MockRenderer mr = new MockRenderer();
         vm.prank(timelock);
-        frens.setRoles(address(0), address(0), address(0), address(mr));
+        frens.setRenderer(address(mr));
         uint256 id = _request(alice);
         assertEq(frens.ownerOf(1), alice, "hers from the mint");
         assertEq(frens.totalMinted(), 1);
@@ -377,7 +377,7 @@ contract IMD6900FrensTest is Test, FrensRules {
     function test_RevealShowsTheFren() public {
         MockRenderer mr = new MockRenderer();
         vm.prank(timelock);
-        frens.setRoles(address(0), address(0), address(0), address(mr));
+        frens.setRenderer(address(mr));
         uint256 id = _request(alice);
         _approve(id);
         uint24 c = _combo(MUMU, 3, 1, 0, 2, 0, 7, SABER);
@@ -534,7 +534,7 @@ contract IMD6900FrensTest is Test, FrensRules {
         vm.prank(keeper);
         (bytes32 d1,) = frens.approveJob(a, 7, d, _quote());
         vm.prank(timelock);
-        frens.setRoles(address(0), address(0), bob, address(0));
+        frens.setRoles(address(0), address(0), bob);
         vm.prank(keeper);
         (bytes32 d2,) = frens.approveJob(b, 7, d, _quote());
         assertTrue(d1 != d2);
@@ -898,6 +898,36 @@ contract IMD6900FrensTest is Test, FrensRules {
         assertEq(to, address(frens), "always to the floor");
     }
 
+    /// @dev The art is the owner's to adjust, at once and after the handover too, until freezeArt; then nobody's
+    function test_OwnerAdjustsTheArtUntilFrozen() public {
+        uint256 id = _mintOne(alice);
+        address dao = makeAddr("the timelock");
+        vm.prank(timelock);
+        frens.setGovernor(dao);
+        MockRenderer v2 = new MockRenderer();
+        vm.prank(alice);
+        vm.expectRevert(Ownable.Unauthorized.selector);
+        frens.setRenderer(address(v2));
+        vm.prank(timelock); // the owner: a team wallet
+        frens.setRenderer(address(v2));
+        assertEq(frens.renderer(), address(v2));
+        assertGt(bytes(frens.tokenURI(id)).length, 0);
+        vm.prank(alice);
+        vm.expectRevert(Ownable.Unauthorized.selector);
+        frens.freezeArt();
+        vm.prank(timelock);
+        frens.freezeArt();
+        assertTrue(frens.artFrozen());
+        address v3 = address(new MockRenderer());
+        vm.prank(timelock);
+        vm.expectRevert(Ownable.Unauthorized.selector);
+        frens.setRenderer(v3);
+        vm.prank(dao);
+        vm.expectRevert(Ownable.Unauthorized.selector);
+        frens.setRenderer(v3);
+        assertEq(frens.renderer(), address(v2), "frozen");
+    }
+
     /// @dev After the handover the governor (the timelock) holds the mint's and the floor's settings; the owner (a team
     ///      wallet, what OpenSea treats as the collection's owner) keeps only the royalty and the transfer validator
     function test_TheOwnerKeepsTheCollection_theGovernorTheMechanics() public {
@@ -921,7 +951,7 @@ contract IMD6900FrensTest is Test, FrensRules {
         vm.expectRevert(Ownable.Unauthorized.selector);
         frens.setMintOpen(false);
         vm.expectRevert(Ownable.Unauthorized.selector);
-        frens.setRoles(team, team, team, team);
+        frens.setRoles(team, team, team);
         vm.expectRevert(Ownable.Unauthorized.selector);
         frens.setGovernor(team);
         vm.stopPrank();
@@ -1013,7 +1043,7 @@ contract IMD6900FrensTest is Test, FrensRules {
         uint256 r = frens.reserve();
         vm.startPrank(timelock);
         frens.setModules(address(0xdead), address(0));
-        frens.setRoles(address(0xdead), address(0xdead), address(0xdead), address(0xdead));
+        frens.setRoles(address(0xdead), address(0xdead), address(0xdead));
         vm.stopPrank();
         assertEq(imd6900.balanceOf(address(frens)), r);
     }

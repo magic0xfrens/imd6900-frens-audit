@@ -102,7 +102,8 @@ interface IFrenRenderer {
 ///    money (modules, roles, tiers, caps, opening the mint), and the trait rules until they are sealed.
 ///  - Owner (a team wallet, never the timelock): the collection on marketplaces. OpenSea and the others treat owner()
 ///    as the collection's owner, who signs in to edit its page, so it must be a wallet that can sign. On chain it only
-///    sets the royalty (at most 10%, always paid to this contract's floor) and the transfer validator.
+///    sets the royalty (at most 10%, always paid to this contract's floor), the transfer validator and the art (the
+///    renderer, until freezeArt).
 ///  - Keeper: approves a request's single job payment (the contract "signs" it through ERC-1271: exactly JOB_PRICE of
 ///    $IMD to `imdPayTo` through the x402 Permit2 proxy).
 ///  - Relayer: signs claim vouchers. It cannot mint anything the contract's own checks refuse.
@@ -142,7 +143,7 @@ contract IMD6900Frens is ERC721, Ownable, ReentrancyGuard {
     address public immutable identity; // identity.md
     address public immutable permit2; // Uniswap Permit2
     address public immutable x402Proxy; // the x402 "exact" Permit2 proxy IMD's payments go through
-    address public immutable priceTable; // SSTORE2: the n-th fren's price, 3 bytes each in PRICE_UNITs, fren 0 first
+    address internal immutable priceTable; // SSTORE2: the n-th fren's price, 3 bytes each in PRICE_UNITs, fren 0 first
 
     /* ── settings (owner) ───────────────────────────────────────── */
 
@@ -153,6 +154,7 @@ contract IMD6900Frens is ERC721, Ownable, ReentrancyGuard {
     address public renderer;
     address public workerGate; // while it says so, a mint needs a worker credit (FrenWorkerGate)
     address public governor; // the mint's and the floor's settings: the timelock after the handover
+    bool public artFrozen; // once set, the renderer never changes
     uint256 public maxImdPerBuy = 50e18; // floor buys, per call
     uint256 public maxEthPerBuy = 0.25 ether;
     bool public mintOpen;
@@ -207,7 +209,7 @@ contract IMD6900Frens is ERC721, Ownable, ReentrancyGuard {
     uint256 public openLowTier; // unrevealed frens below the tier mumu and bobo need: they can only be pepes
     uint256 public totalMinted;
     mapping(uint256 => uint24) public comboOf;
-    mapping(uint256 => bytes32) public revealedHashOf; // a request's frens revealed so far, chained: later parts agree
+    mapping(uint256 => bytes32) internal revealedHashOf; // a request's frens revealed so far, chained: later parts agree
     mapping(uint256 => uint256) public seedOf; // 0 until revealed
 
     /* ── the floor ──────────────────────────────────────────────── */
@@ -224,7 +226,7 @@ contract IMD6900Frens is ERC721, Ownable, ReentrancyGuard {
 
     /* ── ERC-1271: the only payments this contract "signs" ────── */
 
-    mapping(bytes32 => bool) public approvedDigest;
+    mapping(bytes32 => bool) internal approvedDigest; // isValidSignature answers for it
 
     /* ── ERC-721C: Limit Break's transfer validator ─────────────── */
 
@@ -281,12 +283,16 @@ contract IMD6900Frens is ERC721, Ownable, ReentrancyGuard {
 
     /// @dev The collection's marketplace settings: its owner, or the governor
     modifier onlyCurator() {
-        if (msg.sender != owner()) _onlyGovernor();
+        _onlyCurator();
         _;
     }
 
     function _onlyGovernor() internal view {
         if (msg.sender != governor) revert Unauthorized();
+    }
+
+    function _onlyCurator() internal view {
+        if (msg.sender != owner()) _onlyGovernor();
     }
 
     constructor(
@@ -884,13 +890,25 @@ contract IMD6900Frens is ERC721, Ownable, ReentrancyGuard {
 
     /* ── settings ────────────────────────────────────────────────── */
 
-    /// @notice The keeper, the relayer, IMD's payee for jobs and the renderer; address(0) leaves one as it is
-    function setRoles(address keeper_, address relayer_, address imdPayTo_, address renderer_) external onlyGovernor {
+    /// @notice The keeper, the relayer and IMD's payee for jobs; address(0) leaves one as it is
+    function setRoles(address keeper_, address relayer_, address imdPayTo_) external onlyGovernor {
         if (keeper_ != address(0)) keeper = keeper_;
         if (relayer_ != address(0)) relayer = relayer_;
         if (imdPayTo_ != address(0)) imdPayTo = imdPayTo_;
-        if (renderer_ != address(0)) renderer = renderer_;
         emit Setting("roles", 0, address(0));
+    }
+
+    /// @notice The art (the collection's look, like its page): the owner can adjust it at once until it's frozen
+    function setRenderer(address r) external onlyCurator {
+        if (artFrozen) revert Unauthorized();
+        renderer = r;
+        emit Setting("renderer", 0, r);
+    }
+
+    /// @notice Freezes the art for good: no renderer change after this
+    function freezeArt() external onlyCurator {
+        artFrozen = true;
+        emit Setting("artFrozen", 1, renderer);
     }
 
     /// @notice The modules: the swapper that buys the floor, and the workers' window (address(0): none)

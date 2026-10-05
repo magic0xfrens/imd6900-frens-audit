@@ -27,7 +27,8 @@
 // Env: FRENS (the contract), ETH_RPC_URL, IMD_API (https://api.imd.fun), IMD_PAID_TOKEN (64 hex: names its orders),
 //      KEEPER_KEY (the contract's keeper: sends approveJob, needs gas ETH), RELAYER_KEY (the contract's relayer: signs
 //      vouchers, holds nothing), KEEPER_RPC (https://rpc.mevblocker.io: its transactions stay private), STATE_FILE (~/.config/imd/fren-relayer.json), PORT (8787; 0 = don't serve),
-//      EVERY (30 seconds), INDEXER. Keys are never printed.
+//      EVERY (30 seconds), INDEXER, AUTO_REVEAL (1: the keeper sends each ready request's reveal itself, part by part,
+//      so frens reveal without anyone fetching the voucher; 0: only serve the vouchers). Keys are never printed.
 import { createHash, randomBytes } from "node:crypto";
 import { mkdirSync, readFileSync, renameSync, writeFileSync, existsSync } from "node:fs";
 import { createServer } from "node:http";
@@ -58,6 +59,7 @@ const JOB_PRICE = 500000000000000000n;
 const NO_KEY_SIG = "0x" + "00".repeat(65); // the contract ignores the bytes; some schemas want 65
 const VOUCHER_DAYS = 7; // a voucher's life; re-signed when less than a day is left
 const PART = 30; // frens per reveal transaction (~4.3M gas)
+const AUTO_REVEAL = (process.env.AUTO_REVEAL ?? "1") !== "0";
 
 const pub = createPublicClient({ chain: mainnet, transport: http(RPC), batch: { multicall: true } });
 const keyed = (name) => {
@@ -96,6 +98,8 @@ const ABI = [
   { type: "function", name: "buyFloor", stateMutability: "nonpayable", inputs: [u("minOut")], outputs: [] },
   { type: "function", name: "buyFloorWithEth", stateMutability: "nonpayable", inputs: [u("ethIn"), u("minOut")], outputs: [] },
   { type: "function", name: "unwrapWeth", stateMutability: "nonpayable", inputs: [], outputs: [u("amount")] },
+  { type: "function", name: "lastEthBuyBlock", stateMutability: "view", inputs: [], outputs: [{ type: "uint256" }] },
+  { type: "function", name: "reveal", stateMutability: "nonpayable", inputs: [u("requestId"), { type: "uint24[]" }, { type: "string" }, { type: "bytes32" }, u("deadline"), { type: "bytes" }, u("upTo")], outputs: [] },
 ];
 const WETH = "0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2";
 const read = (functionName, args = []) => pub.readContract({ address: FRENS, abi: ABI, functionName, args });
@@ -461,6 +465,7 @@ async function pass() {
           await checkJob(id, req, ctx);
         } else if (e.status === "ready") {
           await refresh(id, req, ctx);
+          if (AUTO_REVEAL) await autoReveal(id, req);
         }
       }
       if (entry(id).errors) note(id, { errors: 0 });
@@ -478,6 +483,15 @@ async function pass() {
   try { await floorBuy(); } catch (err) { log(`floor buy: ${err.shortMessage || err.message}`); }
 }
 
+/** The keeper reveals the next part of a ready request with its voucher (anyone may; this way nobody has to) */
+async function autoReveal(id, req) {
+  const v = entry(id).voucher;
+  if (!keeperWallet || DRY || !v) return;
+  const upTo = v.upTo.find((n) => n > req.revealed);
+  if (upTo === undefined) return;
+  await sendKeeper("reveal", [BigInt(id), v.combos, v.jobId, v.outputHash, BigInt(v.deadline), v.sig, BigInt(upTo)], `#${id}: revealed frens ${req.revealed + 1}-${upTo} of ${req.count}`);
+}
+
 // ── 4. the floor: mints buy their share into IMD6900 themselves; this pushes what still waits ──
 // Each buy stops once it moved the price by half the pool's fee (FrenSwapper), so it's safe for anyone to call, with
 // no minimum out; one buy a block. ETH from fees and royalties goes ETH -> $IMD -> IMD6900 the same way.
@@ -485,12 +499,13 @@ async function floorBuy() {
   if (!keeperWallet || DRY) return;
   const weth = await pub.readContract({ address: WETH, abi: [{ type: "function", name: "balanceOf", stateMutability: "view", inputs: [{ type: "address" }], outputs: [{ type: "uint256" }] }], functionName: "balanceOf", args: [FRENS] });
   if (weth > 10n ** 15n) await sendKeeper("unwrapWeth", [], "royalties in WETH unwrapped");
-  const [waiting, eth, ethCap, last, delay, block] = await Promise.all([
-    read("floorImd"), pub.getBalance({ address: FRENS }), read("maxEthPerBuy"), read("lastFloorBuyBlock"), read("buyDelayBlocks"), pub.getBlockNumber(),
+  const [waiting, eth, ethCap, last, lastEth, delay, block] = await Promise.all([
+    read("floorImd"), pub.getBalance({ address: FRENS }), read("maxEthPerBuy"), read("lastFloorBuyBlock"), read("lastEthBuyBlock"),
+    read("buyDelayBlocks"), pub.getBlockNumber(),
   ]);
-  if (block < last + delay) return; // one buy a block
-  if (waiting >= 10n ** 16n) return sendKeeper("buyFloor", [0n], `floor: ${Number(waiting) / 1e18} $IMD waiting, pushed`);
-  if (eth >= 10n ** 15n) return sendKeeper("buyFloorWithEth", [eth < ethCap ? eth : ethCap, 0n], `floor: ${Number(eth) / 1e18} ETH from fees, pushed`);
+  // each route keeps its own one-a-block pace
+  if (waiting >= 10n ** 16n && block >= last + delay) await sendKeeper("buyFloor", [0n], `floor: ${Number(waiting) / 1e18} $IMD waiting, pushed`);
+  if (eth >= 10n ** 15n && block >= lastEth + delay) await sendKeeper("buyFloorWithEth", [eth < ethCap ? eth : ethCap, 0n], `floor: ${Number(eth) / 1e18} ETH from fees, pushed`);
 }
 
 async function sendKeeper(functionName, args, what) {

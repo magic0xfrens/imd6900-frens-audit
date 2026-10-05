@@ -57,8 +57,10 @@ five agents choose the frens' traits layer by layer; the rest of the price backs
   tiers can only go down afterwards.
 - **Owner** (`owner()`): a team wallet, never the timelock: marketplaces (OpenSea) treat it as the collection's owner,
   who signs in to edit the collection. On chain it can only set the royalty (at most 10%, always paid to the frens
-  contract's floor) and the transfer validator; the governor can set those too.
-- **Keeper**: approves job payments. **Relayer**: signs vouchers; it can only choose among combos the contract accepts.
+  contract's floor), the transfer validator and the art (`setRenderer`, until the one-way `freezeArt`); the governor
+  can set those too. The art can be deployed after the contracts (`DeployFrens.art()`, `isOurArt`).
+- **Keeper**: approves job payments, and (relayer tool, AUTO_REVEAL) sends the reveals. **Relayer**: signs vouchers;
+  it can only choose among combos the contract accepts.
 - **Gate owner**: the deployer; can only widen who may mint (`openPublic`).
 - The swapper and the gate are callable only by the frens contract where it matters.
 
