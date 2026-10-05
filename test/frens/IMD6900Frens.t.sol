@@ -1247,28 +1247,31 @@ contract IMD6900FrensTest is Test, FrensRules {
         imd.approve(address(f), type(uint256).max);
     }
 
-    /// @dev The table is the S-curve 6.9 / (1 + 9 e^(-k n)): it starts at 0.69, never goes down, and is a logistic with a
-    ///      6.9 ceiling: 6.9 / p(n) - 1 shrinks by the same factor e^(-k) every fren (0.99811 for k = 0.0018884), to
-    ///      the table's 0.0001. All 2222 cost 7,380 $IMD (~30 ETH when it was set).
+    /// @dev The table (script/frens/price/prices.py): a cheap start for the strategy's first 140 and the workers' window's
+    ///      420 (frens 1-560, 0.69 -> 0.95), then a logistic that grows exponentially (each step at least the last, to its
+    ///      turn near fren 640) and then plateaus (each step at most the last) at 3.2378. All 2222 cost 5,422.3466 $IMD:
+    ///      22.22 ETH at 244.03 $IMD per ETH, IMD's pool on 2026-10-05.
     function test_PriceTableIsTheCurve() public {
         IMD6900Frens f = _curved();
         uint256 last;
         uint256 total;
-        uint256 rPrev;
+        uint256 step;
+        uint256 unit = 0.0001e18; // the table's rounding
         for (uint256 n; n < 2222; ++n) {
             uint256 p = f.priceOf(n);
             assertGe(p, last, "never goes down");
-            assertLt(p, 6.9e18, "under the ceiling");
+            if (n < 560) assertLe(p, 0.95e18, "the strategy's and the workers' frens are the cheapest");
+            if (n > 561 && n <= 639) assertGe(p - last + unit, step, "exponential: each step at least the last");
+            if (n > 641) assertLe(p - last, step + unit, "then a plateau: each step at most the last");
+            if (n > 0) step = p - last;
             last = p;
             total += p;
-            uint256 r = 6.9e18 * 1e18 / p - 1e18; // 9 e^(-k n), in 1e18
-            if (n > 0) assertApproxEqRel(r * 1e18 / rPrev, 0.998113389e18, 0.00025e18, "a logistic: the same step every fren");
-            rPrev = r;
         }
         assertEq(f.priceOf(0), 0.69e18);
-        assertEq(f.priceOf(2221), 6.0752e18);
-        assertEq(f.priceOf(1162), 3.445e18);
-        assertApproxEqAbs(total, 7380e18, 0.01e18, "all 2222: 7,380 $IMD");
+        assertEq(f.priceOf(139), 0.7471e18, "the strategy's last");
+        assertEq(f.priceOf(559), 0.95e18, "the window's last");
+        assertEq(f.priceOf(2221), 3.2378e18, "the plateau");
+        assertEq(total, 5422.3466e18, "all 2222: 5,422.35 $IMD");
         assertEq(f.quote(2222), total);
     }
 
@@ -1288,7 +1291,7 @@ contract IMD6900FrensTest is Test, FrensRules {
         for (uint256 i; i < 15; ++i) f.requestMint(69, type(uint256).max); // 1045 frens in
         vm.stopPrank();
         assertEq(f.quote(1), f.priceOf(1045));
-        assertApproxEqAbs(f.quote(1), 3.0655e18, 0.0001e18, "fren 1046 costs ~3.07");
+        assertEq(f.quote(1), 3.1646e18, "fren 1046, near the plateau");
     }
 
     function test_MaxPayStopsAPriceThatMoved() public {

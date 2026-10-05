@@ -29,8 +29,9 @@ five agents choose the frens' traits layer by layer; the rest of the price backs
 
 ## How value moves
 
-- **Mint** (`requestMint` / `requestMintFor`, or `FrenMinter.mintWithEth`): the price is `quote(count)` = the larger of
-  the S-curve table (0.69 → 6.9 $IMD, `script/frens/price`) and `count × floor value / frens out` (the floor's
+- **Mint** (`requestMint` / `requestMintFor`, or `FrenMinter.mintWithEth`): the price is `quote(count)` = the larger of the
+  curve table (`script/frens/price`: 0.69 → 0.95 $IMD for frens 1–560, then exponential to a 3.24 plateau; 5,422 $IMD
+  for all 2222) and `count × floor value / frens out` (the floor's
   IMD6900 counted at `FrenSwapper.floorRate()`, the lower of the pool's price and a slow average of the floor's own
   buys). 0.5 $IMD per request goes to `jobBudget`; the rest to `floorImd`, and the mint buys up to `maxImdPerBuy` of
   it into IMD6900 at once (one buy a block, each stopped at half the pair pool's fee of price movement).

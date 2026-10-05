@@ -6,4 +6,4 @@ The IMD6900 Frens contracts (Ethereum), their tests, deploy scripts, art and pri
 forge build --offline && forge test --offline
 ```
 
-Source: snapshot of the `imd6900-frens` branch at 8eeab6e.
+Source: snapshot of the `imd6900-frens` branch at 9130829.

@@ -64,9 +64,9 @@ interface IFrenRenderer {
 }
 
 /// @title IMD6900Frens - 2222 frens, each built by five agents in the IMD swarm, each backed by a floor of IMD6900
-/// @notice The price rises along an S-curve: the first fren costs 0.69 $IMD, the price grows exponentially, turns near
-///  fren 1163 (3.45) and flattens toward 6.9; all 2222 cost 7,380 $IMD (priceOf; the table is written at deploy, see
-///  script/frens/price). A mint never costs less than the floor it joins (quote). One request mints 1 to 69 frens at once, as many as the minter's bag allows; they're
+/// @notice The price: frens 1-560 (the strategy's first and the workers' window) rise slowly from 0.69 to 0.95 $IMD;
+///  then the price grows exponentially, turns near fren 640 and plateaus at 3.24; all 2222 cost 5,422 $IMD (priceOf;
+///  the table is written at deploy, see script/frens/price). A mint never costs less than the floor it joins (quote). One request mints 1 to 69 frens at once, as many as the minter's bag allows; they're
 ///  unrevealed until a job in the IMD swarm builds them. It pays:
 ///  - 0.50 for that job, in which five agents build the request's frens layer by layer: background, character and
 ///    face, eye lens, coat and shirt, hat and item. Each sees what the ones before it chose.

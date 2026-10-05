@@ -381,12 +381,22 @@ async function pickMany(card, req, rules, openLowTier, reserved = new Set()) {
   };
   const mints = async (list) => {
     const local = list.filter(fits);
-    const codes = await Promise.all(local.map((c) => read("check", [c, req.tier])));
-    return local.find((_, i) => Number(codes[i]) === 0) ?? null;
+    for (let i = 0; i < local.length; i += 20) { // in order, 20 checks at a time: the first that mints wins
+      const part = local.slice(i, i + 20);
+      const codes = await Promise.all(part.map((c) => read("check", [c, req.tier])));
+      const ok = part.find((_, j) => Number(codes[j]) === 0);
+      if (ok !== undefined) return ok;
+    }
+    return null;
   };
+  // the nearest free variations: one trait changed (item, shirt, background, face, eye, coat), then item and
+  // background together; character and hat stay the agents'. check() rules out what the tier can't take.
+  const values = (k) => TRAITS.find(([key]) => key === k)[2].map((_, v) => v);
   const near = (c) => {
     const t = traitsOf(c);
-    return ["item", "shirt"].flatMap((k) => TRAITS.find(([key]) => key === k)[2].map((_, v) => comboOf({ ...t, [k]: v })));
+    const one = ["item", "shirt", "background", "face", "eye", "coat"].flatMap((k) => values(k).map((v) => comboOf({ ...t, [k]: v })));
+    const two = values("item").flatMap((i) => values("background").map((b) => comboOf({ ...t, item: i, background: b })));
+    return [...new Set([...one, ...two])].filter((x) => x !== c);
   };
   const take = (combo, f, from) => {
     chosen.push({ combo, name: f?.name ?? "", bio: f?.bio ?? "", from });

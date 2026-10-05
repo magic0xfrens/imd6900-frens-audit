@@ -155,11 +155,11 @@ contract DeployFrensForkTest is Test, FrensRules {
     }
 
     /// @notice Before the opening the owner mints the curve's first frens to the strategy (tier 3, by its identity.md
-    ///         NFTs), paid in ETH through FrenMinter.buyImd; nobody else can mint yet. Logs what 150 cost in ETH.
+    ///         NFTs), paid in ETH through FrenMinter.buyImd; nobody else can mint yet. Logs what the 140 cost in ETH.
     function test_FirstFrensToTheStrategy() public {
         d = s.deploy(address(s), keeper, relayer); // closed
         uint256 cost;
-        for (uint256 n; n < 150; ++n) cost += d.frens.priceOf(n);
+        for (uint256 n; n < 140; ++n) cost += d.frens.priceOf(n);
         cost += cost / 100;
         (address imd, address strategy) = (s.IMD(), s.IMD6900());
         address payer = address(uint160(uint256(keccak256("owner's wallet")))); // the deployer's ETH (a script contract can't take the refund)
@@ -174,12 +174,12 @@ contract DeployFrensForkTest is Test, FrensRules {
         IERC20(imd).approve(address(d.frens), cost);
         uint256 a = d.frens.requestMintFor(strategy, 69, type(uint256).max);
         d.frens.requestMintFor(strategy, 69, type(uint256).max);
-        d.frens.requestMintFor(strategy, 12, type(uint256).max);
+        d.frens.requestMintFor(strategy, 2, type(uint256).max);
         vm.stopPrank();
-        emit log_named_decimal_uint("$IMD for the first 150 frens (+1%)", cost, 18);
+        emit log_named_decimal_uint("$IMD for the first 140 frens (+1%)", cost, 18);
         emit log_named_decimal_uint("ETH it took on POOL4", eth, 18);
         emit log_named_decimal_uint("$IMD left with the owner", IERC20(imd).balanceOf(address(s)), 18);
-        assertEq(d.frens.balanceOf(strategy), 150);
+        assertEq(d.frens.balanceOf(strategy), 140);
         (, uint8 tier,,,,,,,,) = d.frens.requests(a);
         assertEq(tier, 3, "the strategy's identity.md NFTs make it tier 3");
         assertEq(address(d.minter).balance, 0);
